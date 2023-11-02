@@ -1,9 +1,9 @@
 #!/bin/bash
 
 mvn -f ../pom.xml -DskipTests clean install &&
-sshpass -p 'ONGzbF65JqYGkzp5xDSEP0sw' rsync ../target/hdfs-template.jar -r -v --progress -e ssh tuz_foms_hadoop_dev_cmp@ambari-sdp-01.gisoms-platform.dev2.pd15.foms.mtp:/home/tuz_foms_hadoop_dev_cmp/manual-deploy/hdfs-template.jar &&
-sshpass -p 'ONGzbF65JqYGkzp5xDSEP0sw' ssh -p 9022 tuz_foms_hadoop_dev_cmp@ambari-sdp-01.gisoms-platform.dev2.pd15.foms.mtp "yarn application -list | awk '\$2 ~ \"hdfs-template\" { print \$1 }' | xargs yarn application -kill &> /dev/null || true" &&
-sshpass -p 'ONGzbF65JqYGkzp5xDSEP0sw' ssh -p 9022 tuz_foms_hadoop_dev_cmp@ambari-sdp-01.gisoms-platform.dev2.pd15.foms.mtp SPARK_MAJOR_VERSION=2 spark-submit \
+sshpass -p 'pass' rsync ../target/hdfs-template.jar -r -v --progress -e ssh login@host:/home/tuz_foms_hadoop_dev_cmp/manual-deploy/hdfs-template.jar &&
+sshpass -p 'pass' ssh -p 9022 login@host "yarn application -list | awk '\$2 ~ \"hdfs-template\" { print \$1 }' | xargs yarn application -kill &> /dev/null || true" &&
+sshpass -p 'pass' ssh -p 9022 login@host SPARK_MAJOR_VERSION=2 spark-submit \
 --name hdfs-template \
 --conf spark.yarn.submit.waitAppCompletion=false \
 --conf spark.hadoop.url=hadoopname-sdp-01.gisoms-platform.dev2.pd15.foms.mtp:8020 \
