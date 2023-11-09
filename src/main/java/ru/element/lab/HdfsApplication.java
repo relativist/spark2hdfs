@@ -75,8 +75,9 @@ public class HdfsApplication {
 
         final Dataset<Row> ds = sparkSession.read()
             .format("gzip")
-            .text(HDFS_URL + hdfsGzFilePath);
-        ds.show(false);
+            .text(HDFS_URL + hdfsGzFilePath)
+            .withColumnRenamed("value", "blob");
+        ds.show(10, false);
 
         final String destPathParquet = IS_LOCAL_RUN ? checkpointDir : "/cmp/data/oms/777/2023/11" ;
         final UUID uuid = UUID.randomUUID();
@@ -135,7 +136,7 @@ public class HdfsApplication {
         conf.set("fs.s3a.connection.ssl.enabled", "false");
         conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
         conf.set("fs.s3a.path.style.access", "true");
-        conf.set("parquet.example.schema", "message data { required binary blob; }");
+        //conf.set("parquet.example.schema", "message data { required binary blob; }");
 
         return conf;
     }
