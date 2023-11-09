@@ -4,47 +4,45 @@ package ru.element.lab;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.spark.SparkConf;
 import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Encoders;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SaveMode;
 import org.apache.spark.sql.SparkSession;
 
-import java.util.Arrays;
-import java.util.List;
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 
 @Slf4j
 public class HdfsApplication {
+    public static final Boolean IS_LOCAL_RUN = false;
+    public static final String CHECKPOINT_SITNIKOV = "/tmp/hdfs-checkpoint-sitnikov";
+    public static final String CHECKPOINT_TUZ = "/tmp/hdfs-checkpoint-tuz";
+
+    public static final String S3_ENDPOINT = "https://s3.gos.sbercloud.dev/";
+    public static final String S3_SECRET_KEY = "6611af62323644f2a3653e02c65904e6";
+    public static final String S3_ACCESS_KEY = "7bb2e375b0b14c7d9c3152f49b5ee3c7";
+    public static final String HDFS_URL = "hdfs://hadoopname-sdp-02.gisoms-platform.dev2.pd15.foms.mtp:8020/";
+
     public static void main(String[] args) {
         final HdfsApplication app = new HdfsApplication();
-        app.runTask();
+
+        //final String s3Key = "zip/zip.csv";
+        //final String s3Key = "100/RH11_1901164.xml";
+        /*final String s3Key = "big_file/RH62_211001.xml";
+        final String bucket = "cmp-dev1";
+        app.runTask(bucket, s3Key);*/
+
+        app.readS3();
     }
 
-    private void runTask() {
-        //final SparkConf sparkConf = confLocal();
-        final SparkConf sparkConf = confHadoop(); //todo to hadoop
-
+    private void readS3() {
+        final SparkConf sparkConf = getConf();
         SparkSession sparkSession = SparkSession.builder()
             .config(sparkConf).getOrCreate();
-
-        //sparkSession.sparkContext().setCheckpointDir("/tmp/hdfs-checkpoint-3");//todo to2
-        sparkSession.sparkContext().setCheckpointDir("/tmp/hdfs-checkpoint-2");//todo to2
-        final String checkpointCurrent = sparkSession.sparkContext().checkpointDir().get();
-        log.info(String.format("Hdfs checkpoint: %s", checkpointCurrent));
-
-        String hdfsPath = "hdfs:///tmp/hdfs-app-pd15/oms/777/2019/1/dfd994da-7fbe-4dba-96ff-3d543c109d0c/";
-        log.info(String.format("Manual build hdfs: %s", hdfsPath));
-
-        String s3Path = "s3a://cmp-dev1/zip/zip.csv";
-        log.info(String.format("Run1: %s", s3Path));
-
-
-        List<String> stringList = Arrays.asList("строка 1", "строка 2", "строка 3");
-        Dataset<String> dataset = sparkSession.createDataset(stringList, Encoders.STRING());
-
-        dataset.show();
-        System.out.println("Start");
-
-
+        System.out.println("Start read.");
         try {
-
+            String s3Path = "s3a://cmp-dev1/zip/zip.csv";
             sparkSession.read().text(s3Path).show();
 
         } catch (Exception e) {
@@ -53,35 +51,84 @@ public class HdfsApplication {
         } finally {
             sparkSession.stop();
         }
+        System.out.println("Stop read.");
     }
 
+    private void runTask(String bucket, String s3Key) {
+        final OffsetDateTime start = OffsetDateTime.now();
+        System.out.println("Start " + start);
+        final SparkConf sparkConf = getConf();
 
-    public SparkConf confLocal() {
+        SparkSession sparkSession = SparkSession.builder()
+            .config(sparkConf).getOrCreate();
+
+        final String checkpointDir = IS_LOCAL_RUN ? CHECKPOINT_SITNIKOV : CHECKPOINT_TUZ;
+        sparkSession.sparkContext().setCheckpointDir(checkpointDir);
+        final String checkpointCurrent = sparkSession.sparkContext().checkpointDir().get();
+        log.info(String.format("Hdfs checkpoint: %s", checkpointCurrent));
+
+        final String originalFile = getOriginalFileName(s3Key);
+        final String hdfsGzFilePath = checkpointDir + "/" + originalFile + ".gz";
+
+        readS3AndStoreToHdfs(bucket, s3Key, hdfsGzFilePath, sparkSession);
+
+        final Dataset<Row> ds = sparkSession.read()
+            .format("gzip")
+            .text(HDFS_URL + hdfsGzFilePath);
+        ds.show(false);
+
+        final String destPathParquet = IS_LOCAL_RUN ? checkpointDir : "/cmp/data/oms/777/2023/11" ;
+        ds.write()
+            .format("parquet")
+            .option("compression", "gzip")
+            .mode(SaveMode.Overwrite)
+            .save(HDFS_URL + destPathParquet + "/" + originalFile + ".parquet");
+
+        new HdfsService(HDFS_URL).cleanFile(hdfsGzFilePath, sparkSession.sparkContext().hadoopConfiguration());
+
+        if (!IS_LOCAL_RUN) {
+            new HdfsService(HDFS_URL).cleanFile(checkpointDir, sparkSession.sparkContext().hadoopConfiguration());
+        }
+
+        System.out.println("Finished. Duration: " + Duration.between(start, OffsetDateTime.now()));
+    }
+
+    private void readS3AndStoreToHdfs(String bucket, String s3Key, String storedFilePath, SparkSession session) {
+        final S3Service s3Service = new S3Service(S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY);
+        final HdfsService hdfsService = new HdfsService(HDFS_URL);
+
+        try (final InputStream inputStream = s3Service.getFile(bucket, s3Key)) {
+            System.out.println("MANUAL FILE CONTENT: ");
+            hdfsService.saveToHdfs(inputStream, storedFilePath);
+        } catch (IOException e) {
+            log.error("On read from s3 service: ", e);
+        }
+    }
+
+    private String getOriginalFileName(String s3Key) {
+        final int idx = s3Key.indexOf("/");
+        if (idx >= 0) {
+            return s3Key.substring(idx + 1);
+        }
+        return s3Key;
+    }
+
+    public SparkConf getConf() {
         SparkConf conf = new SparkConf()
             .setAppName("emd2hdfs")
             .setMaster("local");
-        conf.set("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1");
 
-        conf.set("fs.s3a.access.key", "7bb2e375b0b14c7d9c3152f49b5ee3c7");
-        conf.set("fs.s3a.secret.key", "6611af62323644f2a3653e02c65904e6");
-        conf.set("spark.hadoop.fs.s3a.endpoint", "https://s3.gos.sbercloud.dev/");
-        conf.set("fs.s3a.endpoint", "https://s3.gos.sbercloud.dev/");
-        conf.set("fs.s3a.connection.ssl.enabled", "false");
-        conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
-        conf.set("fs.s3a.path.style.access", "true");
+        if (IS_LOCAL_RUN) {
+            conf.setMaster("local");
+            conf.set("spark.streaming.checkpointDir", HDFS_URL + CHECKPOINT_SITNIKOV);
+        }
+        /*conf.set("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.2.0");
+        conf.set("spark.jars.packages", "org.apache.hadoop:hadoop-common:3.2.0");
+        conf.set("spark.jars.packages", "org.apache.hadoop:hadoop-client:3.2.0");*/
 
-        return conf;
-    }
-
-    public SparkConf confHadoop() {
-        SparkConf conf = new SparkConf()
-            .setAppName("emd2hdfs");
-        conf.set("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.3.1");
-
-        conf.set("fs.s3a.access.key", "7bb2e375b0b14c7d9c3152f49b5ee3c7");
-        conf.set("fs.s3a.secret.key", "6611af62323644f2a3653e02c65904e6");
-        conf.set("spark.hadoop.fs.s3a.endpoint", "https://s3.gos.sbercloud.dev/");
-        conf.set("fs.s3a.endpoint", "https://s3.gos.sbercloud.dev/");
+        conf.set("fs.s3a.access.key", S3_ACCESS_KEY);
+        conf.set("fs.s3a.secret.key", S3_SECRET_KEY);
+        conf.set("fs.s3a.endpoint", S3_ENDPOINT);
         conf.set("fs.s3a.connection.ssl.enabled", "false");
         conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
         conf.set("fs.s3a.path.style.access", "true");
