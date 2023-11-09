@@ -44,7 +44,7 @@ public class HdfsService {
                 gzipOutputStream.write(buffer, 0, bytesRead);
             }
 
-            System.out.println("InputStream успешно сохранен в HDFS." + hdfsFilePath);
+            System.out.println("Stored to HDFS." + hdfsFilePath);
         } catch (IOException e) {
             log.error("", e);
             e.printStackTrace();
@@ -58,7 +58,7 @@ public class HdfsService {
             final ContentSummary cs = fs.getContentSummary(filePath);
 
             if (cs != null) {
-                log.info(String.format("Clean %s,  dirs: %s,  files: %s,  length(bytes): %s,  length(human):%s",
+                System.out.println(String.format("Clean %s,  dirs: %s,  files: %s,  length(bytes): %s,  length(human):%s",
                     storedFilePath,
                     cs.getDirectoryCount(),
                     cs.getFileCount(),

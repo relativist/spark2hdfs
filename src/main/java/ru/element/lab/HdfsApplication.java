@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 @Slf4j
 public class HdfsApplication {
@@ -28,12 +29,12 @@ public class HdfsApplication {
         final HdfsApplication app = new HdfsApplication();
 
         //final String s3Key = "zip/zip.csv";
-        //final String s3Key = "100/RH11_1901164.xml";
-        /*final String s3Key = "big_file/RH62_211001.xml";
+        final String s3Key = "100/RH11_1901164.xml"; // small
+        //final String s3Key = "big_file/RH62_211001.xml"; //big
         final String bucket = "cmp-dev1";
-        app.runTask(bucket, s3Key);*/
+        app.runTask(bucket, s3Key);
 
-        app.readS3();
+        //app.readS3();
     }
 
     private void readS3() {
@@ -78,11 +79,13 @@ public class HdfsApplication {
         ds.show(false);
 
         final String destPathParquet = IS_LOCAL_RUN ? checkpointDir : "/cmp/data/oms/777/2023/11" ;
+        final UUID uuid = UUID.randomUUID();
         ds.write()
             .format("parquet")
             .option("compression", "gzip")
             .mode(SaveMode.Overwrite)
-            .save(HDFS_URL + destPathParquet + "/" + originalFile + ".parquet");
+            .save(HDFS_URL + destPathParquet + "/" + uuid);
+        System.out.println("Stored as " + uuid);
 
         new HdfsService(HDFS_URL).cleanFile(hdfsGzFilePath, sparkSession.sparkContext().hadoopConfiguration());
 
@@ -132,6 +135,7 @@ public class HdfsApplication {
         conf.set("fs.s3a.connection.ssl.enabled", "false");
         conf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
         conf.set("fs.s3a.path.style.access", "true");
+        conf.set("parquet.example.schema", "message data { required binary blob; }");
 
         return conf;
     }
